@@ -299,5 +299,46 @@ class TestInterleavedReplayCredentialRedaction:
         ]
 
 
+class TestInterleavedReplayRepairedToolName:
+    """Verbatim replay must carry the REPAIRED tool name, not the raw one.
+
+    validate_tool_calls repairs ``tool_calls[].function.name`` (e.g. a Claude-OAuth
+    proxy's ``terminal_ide`` -> ``terminal``) but the captured ordered blocks keep the
+    raw name. Replaying the raw name lets the proxy re-cloak it (``terminal_ide_ide``),
+    the model copies the longer name, and the suffix grows every turn.
+    """
+
+    def test_tool_use_name_resourced_from_repaired_tool_calls(self):
+        ordered = [
+            {"type": "thinking", "thinking": "Run it.", "signature": "sig-AAA"},
+            {"type": "tool_use", "id": "toolu_1", "name": "terminal_ide", "input": {"command": "ls"}},
+            {"type": "thinking", "thinking": "Again.", "signature": "sig-BBB"},
+            {"type": "tool_use", "id": "toolu_2", "name": "read_file_ide_ide", "input": {"path": "a"}},
+        ]
+        assistant_msg = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "toolu_1", "type": "function",
+                 "function": {"name": "terminal", "arguments": json.dumps({"command": "ls"})}},
+                {"id": "toolu_2", "type": "function",
+                 "function": {"name": "read_file", "arguments": json.dumps({"path": "a"})}},
+            ],
+            "anthropic_content_blocks": ordered,
+        }
+        messages = [
+            {"role": "user", "content": "go"},
+            assistant_msg,
+            {"role": "tool", "tool_call_id": "toolu_1", "content": "ok"},
+            {"role": "tool", "tool_call_id": "toolu_2", "content": "ok"},
+        ]
+        _system, out = convert_messages_to_anthropic(messages, base_url=None, model="claude-opus-4-8")
+        blocks = [m for m in out if m.get("role") == "assistant"][-1]["content"]
+        names = {b["id"]: b["name"] for b in blocks if b.get("type") == "tool_use"}
+        assert names == {"toolu_1": "terminal", "toolu_2": "read_file"}
+        # Captured block list is not mutated in place.
+        assert ordered[1]["name"] == "terminal_ide"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

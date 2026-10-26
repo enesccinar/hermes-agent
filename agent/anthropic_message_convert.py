@@ -346,6 +346,14 @@ def _replay_ordered_blocks(m: dict[str, Any], ordered_blocks: list[Any]) -> Opti
         for tc in m.get("tool_calls", []) or []
         if isinstance(tc, dict)
     }
+    # Name too: validate_tool_calls repairs tool_calls[].function.name (proxy ``terminal_ide`` ->
+    # ``terminal``) but the captured block keeps the raw name. Replaying it lets a cloaking proxy
+    # re-suffix it, the model copies the longer name, and ``_ide`` stacks every turn.
+    repaired_name_by_id = {
+        _sanitize_tool_id(tc.get("id", "")): (tc.get("function", {}) or {}).get("name")
+        for tc in m.get("tool_calls", []) or []
+        if isinstance(tc, dict)
+    }
     replayed: list[dict[str, Any]] = []
     relocated_cc = None
     dropped_blank_text = False
@@ -358,6 +366,8 @@ def _replay_ordered_blocks(m: dict[str, Any], ordered_blocks: list[Any]) -> Opti
             continue
         if clean.get("type") == "tool_use" and (redacted := redacted_input_by_id.get(clean.get("id", ""))) is not None:
             clean["input"] = redacted
+        if clean.get("type") == "tool_use" and (name := repaired_name_by_id.get(clean.get("id", ""))):
+            clean["name"] = name
         replayed.append(clean)
     # Nothing cacheable survived (e.g. signed thinking + blank text): emit the placeholder so the
     # turn stays schema-valid and a relocated marker has a carrier.
