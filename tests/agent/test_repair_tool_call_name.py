@@ -125,3 +125,28 @@ class TestVolcEngineXmlPollution:
         # rest of the pipeline (fuzzy match at 0.7 cutoff) can still
         # recover the obvious target.
         assert repair('"terminal"') == "terminal"
+
+
+class TestProxyIdeSuffix:
+    """Claude-OAuth proxies (9router ``cloakToolsOnOAuth``) rename tools to
+    ``<name>_ide`` upstream and unmap only one suffix on the way back. Models
+    copy/stack it (``terminal_ide_ide``), which fuzzy match cannot reach."""
+
+    @pytest.mark.parametrize("name,expected", [
+        ("patch_ide", "patch"),
+        ("terminal_ide_ide", "terminal"),
+        ("read_file_ide_ide", "read_file"),
+        ("patch_ide_ide", "patch"),
+        ("execute_code_ide_ide_ide", "execute_code"),
+        ("session_search_ide_ide_ide_ide", "session_search"),
+        ("Terminal_IDE_ide", "terminal"),
+    ])
+    def test_stacked_ide_suffix(self, repair, name, expected):
+        assert repair(name) == expected
+
+    def test_registered_ide_name_passes_through(self):
+        from run_agent import AIAgent
+        stub = SimpleNamespace(valid_tool_names=VALID | {"open_ide"})
+        bound = AIAgent._repair_tool_call.__get__(stub, AIAgent)
+        assert bound("open_ide") == "open_ide"
+        assert bound("open_ide_ide") == "open_ide"
