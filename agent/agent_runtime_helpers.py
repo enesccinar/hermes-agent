@@ -2634,6 +2634,19 @@ def repair_tool_call(agent, tool_name: str) -> str | None:
     for c in cands:
         if c and c in agent.valid_tool_names:
             return c
+    # Claude-OAuth proxies (9router ``cloakToolsOnOAuth``) send tools upstream as ``<name>_ide`` and
+    # unmap only ONE suffix on the way back, so models that copy/stack it emit ``terminal_ide_ide``
+    # — beyond the fuzzy cutoff. Peel trailing ``_ide`` one at a time (so a genuinely registered
+    # ``*_ide`` tool still wins) and retry the cheap candidates after each peel.
+    _peeled = tool_name
+    while True:
+        _next = re.sub(r"[_-]ide$", "", _peeled, flags=re.IGNORECASE)
+        if not _next or _next == _peeled:
+            break
+        _peeled = _next
+        for c in (_peeled, _peeled.lower(), _norm(_peeled), _camel_snake(_peeled)):
+            if c in agent.valid_tool_names:
+                return c
     matches = get_close_matches(lowered, agent.valid_tool_names, n=1, cutoff=0.7)
     return matches[0] if matches else None
 
