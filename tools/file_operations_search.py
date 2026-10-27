@@ -617,6 +617,10 @@ class SearchMixin:
                 start_new_session=True)
         except OSError as exc:
             return ExecuteResult(stdout=f"rg: {exc}", exit_code=2)
+        # start_new_session makes rg its own group leader, so pgid == pid. Record it before the
+        # lookup: if rg already exited (zombie), macOS getpgid raises ESRCH, the block below is
+        # suppressed, and the kill helper would otherwise re-raise "[Errno 3] No such process".
+        proc._hermes_pgid = proc.pid
         # Record the group at spawn, as LocalEnvironment._run_bash does: rg can exit between the
         # poll and the kill below, and on macOS a not-yet-reaped child has no pgid any more.
         with contextlib.suppress(ProcessLookupError):
