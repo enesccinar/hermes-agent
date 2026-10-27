@@ -125,3 +125,16 @@ def test_limit_hit_keeps_drained_matches_when_group_kill_is_refused(tree, ops_fa
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: (_ for _ in ()).throw(PermissionError(1, "Operation not permitted")))
     result = ops.search(pattern="needle", path=str(tree), limit=2)
     assert not result.error and len(result.matches) == 2, result.to_dict()
+
+
+def test_limit_hit_survives_rg_exiting_before_the_group_lookup(tree, ops_factory, monkeypatch):
+    """rg can exit between ``poll()`` and the kill. macOS ``getpgid`` on that zombie raises
+    ESRCH ("[Errno 3] No such process"). Without a pgid recorded at spawn, the kill
+    helper re-raised it and the whole search came back as a tool error."""
+    import os
+
+    monkeypatch.setenv("HERMES_NATIVE_FILE_READ", "1")
+    ops = ops_factory(tree, [])
+    monkeypatch.setattr(os, "getpgid", lambda pid: (_ for _ in ()).throw(ProcessLookupError(3, "No such process")))
+    result = ops.search(pattern="needle", path=str(tree), limit=2)
+    assert not result.error and len(result.matches) == 2, result.to_dict()
