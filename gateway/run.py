@@ -4476,11 +4476,16 @@ def _drain_restart_safe_cron_deliveries(adapters, loop, runner=None) -> None:
             continue
         with _profile_runtime_scope(profile_home or get_hermes_home()):
             owned = (getattr(runner, "_profile_bot_platforms", None) or {}).get(profile_name)
-            if (profile_name is not None and adapters
+            if (profile_name is not None
                     and not sched_preflight.has_credential_platform(profile_adapters, owned)):
                 routes = sched_preflight._primary_profile_routes_for_current_home()
                 if routes:
-                    profile_adapters = sched_preflight.SharedRouteAdapters(adapters, routes)
+                    # ``bot_profile`` routes ride a secondary profile's bot: pass every live map.
+                    shared = sched_preflight.SharedRouteAdapters(
+                        adapters or {}, routes,
+                        bot_adapters=getattr(runner, "_profile_adapters", None))
+                    if shared:
+                        profile_adapters = shared
             cron_scheduler.drain_delivery_queue(profile_adapters, loop)
 
 

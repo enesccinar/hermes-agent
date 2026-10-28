@@ -566,8 +566,13 @@ class InProcessCronScheduler(CronScheduler):
                 return adapters
             tick_adapters = (profile_adapters or {}).get(profile_name) or {}
             owned = (profile_bot_platforms or {}).get(profile_name)
-            if not has_credential_platform(tick_adapters, owned) and adapters:
-                return SharedRouteAdapters(adapters, _primary_profile_routes_for_current_home())
+            if not has_credential_platform(tick_adapters, owned):
+                # ``bot_profile`` routes ride a SECONDARY profile's bot, so the view is built even
+                # when the primary map holds no bot at all.
+                shared = SharedRouteAdapters(
+                    adapters, _primary_profile_routes_for_current_home(), bot_adapters=profile_adapters)
+                if shared:
+                    return shared
             return tick_adapters
 
         # Recovery + heartbeat per profile; one broken store must not abort startup for the others.

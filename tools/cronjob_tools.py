@@ -369,11 +369,19 @@ def _run_claimed_job(job: dict[str, Any], extra_prompt: Optional[str] = None) ->
             adapters = runner._adapters_for_profile(profile)
             # A credentialless shared-bot satellite borrows the primary's bot for ROUTED targets
             # only — the same grant the ticker's ``tick_adapters_for`` makes, never the full map.
-            if getattr(runner, "_is_shared_bot_satellite", lambda _p: False)(profile):
-                from cron.scheduler_preflight import (
-                    SharedRouteAdapters, _primary_profile_routes_for_current_home)
+            # ``bot_profile`` routes borrow that SECONDARY profile's bot the same way.
+            from cron.scheduler_preflight import (
+                SharedRouteAdapters, _primary_profile_routes_for_current_home, has_credential_platform)
 
+            owned = (getattr(runner, "_profile_bot_platforms", None) or {}).get(profile)
+            if getattr(runner, "_is_shared_bot_satellite", lambda _p: False)(profile):
                 adapters = SharedRouteAdapters(adapters, _primary_profile_routes_for_current_home())
+            elif profile and profile != "default" and not has_credential_platform(adapters, owned):
+                shared = SharedRouteAdapters(
+                    getattr(runner, "adapters", None) or {}, _primary_profile_routes_for_current_home(),
+                    bot_adapters=getattr(runner, "_profile_adapters", None))
+                if shared:
+                    adapters = shared
         gateway_loop = getattr(runner, "_gateway_loop", None) if runner is not None else None
         try:
             # run_one_job records last_run_at/last_status via mark_job_run; `job` is the

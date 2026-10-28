@@ -205,18 +205,25 @@ class SharedRouteAdapters:
     See #101113.
     """
 
-    def __init__(self, primary_adapters, routes) -> None:
+    def __init__(self, primary_adapters, routes, bot_adapters=None) -> None:
         self._primary = dict(primary_adapters or {})
         self._routes = list(routes or [])
+        # ``bot_profile`` routes are served inbound by THAT secondary profile's bot, so a cron target
+        # they map resolves that bot's live adapter — never the primary's (and vice versa).
+        self._bots = {
+            name: dict(adapters or {}) for name, adapters in (bot_adapters or {}).items() if name}
+
+    def _adapters_for_route(self, route) -> dict:
+        bot_profile = getattr(route, "bot_profile", None)
+        if not bot_profile or bot_profile == "default":
+            return self._primary
+        return self._bots.get(bot_profile) or {}
 
     def __bool__(self) -> bool:
-        return bool(self._primary) and bool(self._routes)
+        return bool(self._routes) and any(self._adapters_for_route(r) for r in self._routes)
 
     def get(self, platform, target=None, default=None):
         if not target:
-            return default
-        adapter = self._primary.get(platform)
-        if adapter is None:
             return default
         platform_key = str(getattr(platform, "value", platform)).lower()
         chat_id = str(target.get("chat_id") or "") or None
@@ -230,8 +237,12 @@ class SharedRouteAdapters:
                 continue
             if not (route.chat_id or route.thread_id):
                 continue  # guild-only routes are not target-exact
+            adapter = self._adapters_for_route(route).get(platform)
+            if adapter is None:
+                continue
             if route.matches(
                 str(route.platform), guild_id=route.guild_id, chat_id=chat_id, thread_id=thread_id,
+                adapter_profile=getattr(route, "bot_profile", None),
             ):
                 return adapter
         return default

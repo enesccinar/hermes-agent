@@ -192,6 +192,40 @@ class TestCronjobRunExecutesImmediately:
         assert adapters.get("telegram", {"chat_id": "-999"}) is None
         assert adapters.get("telegram") is None
 
+    def test_execute_job_now_grants_a_bot_profile_satellite_its_routed_bot(self):
+        """Manual run of a credentialless satellite whose route names a SECONDARY bot
+        (``bot_profile``): the run gets the routed view over that bot, as the ticker does."""
+        from pathlib import Path
+
+        from cron.scheduler_preflight import SharedRouteAdapters
+        from gateway.profile_routing import ProfileRoute
+
+        bot = object()
+        runner = SimpleNamespace(
+            adapters={}, _gateway_loop=object(),
+            _adapters_for_profile=lambda profile: {},
+            _is_shared_bot_satellite=lambda profile: False,
+            _profile_adapters={"keeper": {}, "botowner": {"discord": bot}},
+            _profile_bot_platforms={},
+        )
+        route = ProfileRoute(name="ops", platform="discord", profile="keeper", chat_id="C1",
+                             bot_profile="botowner")
+        completed = {"id": "job-run-1", "last_status": "ok", "last_error": None}
+
+        with patch("tools.cronjob_tools.claim_job_for_fire", return_value={**_JOB, "fire_claim": {"by": "manual-owner"}}), \
+             patch("gateway.run._gateway_runner_ref", return_value=runner), \
+             patch("hermes_constants.get_hermes_home", return_value=Path("/srv/hermes/profiles/keeper")), \
+             patch("cron.scheduler_preflight._primary_profile_routes_for_current_home", return_value=[route]), \
+             patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
+             patch("tools.cronjob_tools.get_job", return_value=completed):
+            res = _execute_job_now(dict(_JOB))
+
+        assert res["success"] is True
+        adapters = m_run.call_args.kwargs["adapters"]
+        assert isinstance(adapters, SharedRouteAdapters)
+        assert adapters.get("discord", {"chat_id": "C1"}) is bot
+        assert adapters.get("discord", {"chat_id": "C9"}) is None
+
     def test_execute_job_now_fails_instead_of_falling_back_when_owner_resolution_raises(self):
         """Fail closed: if the owner profile cannot be resolved, the run is marked failed with the
         error surfaced — it must NOT silently fall back to ``runner.adapters`` (the default bot)."""

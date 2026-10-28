@@ -135,7 +135,7 @@ def test_multiplex_housekeeping_uses_primary_routes_for_credentialless_satellite
         yield
 
     class FakeSharedRouteAdapters:
-        def __new__(cls, adapters, routes):
+        def __new__(cls, adapters, routes, bot_adapters=None):
             calls.append(("routed", adapters, routes))
             return routed
 
@@ -157,6 +157,45 @@ def test_multiplex_housekeeping_uses_primary_routes_for_credentialless_satellite
     assert calls == [
         ("drain", root_adapters),
         ("routed", root_adapters, ["route-to-secondary"]),
+        ("drain", routed),
+    ]
+
+
+def test_multiplex_housekeeping_routes_satellite_through_bot_profile_bot_without_primary_bot(
+    tmp_path, monkeypatch
+):
+    """The only bot belongs to a secondary profile (``bot_profile`` routes): the drain must still
+    hand the satellite a routed view carrying that profile's adapters."""
+    bot_adapters = {"botowner": {"discord": object()}, "secondary": {}}
+    runner = SimpleNamespace(
+        config=SimpleNamespace(multiplex_profiles=True), adapters={}, _profile_adapters=bot_adapters,
+    )
+    calls = []
+    routed = object()
+    monkeypatch.setattr(gateway_run, "_handoff_watch_scopes",
+                        lambda _runner: [(None, None), ("secondary", tmp_path / "secondary")])
+
+    @contextmanager
+    def fake_scope(_home):
+        yield
+
+    class FakeSharedRouteAdapters:
+        def __new__(cls, adapters, routes, bot_adapters=None):
+            calls.append(("routed", adapters, routes, bot_adapters))
+            return routed
+
+    monkeypatch.setattr(gateway_run, "_profile_runtime_scope", fake_scope)
+    monkeypatch.setattr(sched_preflight, "SharedRouteAdapters", FakeSharedRouteAdapters)
+    monkeypatch.setattr(sched_preflight, "_primary_profile_routes_for_current_home",
+                        lambda: ["route-to-secondary"])
+    monkeypatch.setattr(scheduler, "drain_delivery_queue",
+                        lambda adapters, _loop: calls.append(("drain", adapters)))
+
+    gateway_run._drain_restart_safe_cron_deliveries({}, object(), runner)
+
+    assert calls == [
+        ("drain", {}),
+        ("routed", {}, ["route-to-secondary"], bot_adapters),
         ("drain", routed),
     ]
 
