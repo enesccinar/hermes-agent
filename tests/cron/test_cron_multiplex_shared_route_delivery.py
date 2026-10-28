@@ -217,3 +217,97 @@ def test_multiplex_tick_routes_desktop_served_satellite_with_only_local_adapter(
     # The routed view releases the primary adapter for exactly the route-mapped target.
     assert shared.get(Platform.DISCORD, {"chat_id": "C1"}) is primary
     assert shared.get(Platform.DISCORD, {"chat_id": "unmapped"}) is None
+
+
+# --- bot_profile routes: the satellite rides the NAMED secondary bot, not the primary ---------------
+
+BOT_ROUTE_YAML = {
+    "gateway": {
+        "multiplex_profiles": True,
+        "profile_routes": [
+            {"name": "sat-ch", "platform": "discord", "bot_profile": "botowner", "guild_id": "G1",
+             "chat_id": "C1", "profile": "sat"},
+            {"name": "prim-ch", "platform": "discord", "guild_id": "G1", "chat_id": "C2", "profile": "sat"},
+        ],
+    }
+}
+
+
+def _bot_route_home(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    sat_home = root / "profiles" / "sat"
+    (sat_home / "cron").mkdir(parents=True)
+    (root / "config.yaml").write_text(yaml.safe_dump(BOT_ROUTE_YAML), encoding="utf-8")
+    monkeypatch.setattr("hermes_constants.get_default_hermes_root", lambda: root)
+    return sat_home
+
+
+def test_bot_profile_route_resolves_the_named_secondary_bot(tmp_path, monkeypatch):
+    """A route with ``bot_profile: botowner`` is served inbound by botowner's bot, so cron output for
+    that exact target must go out through botowner's bot. Before, the view only knew the primary
+    map: with no primary Discord bot every such cron send fell to standalone
+    (``DISCORD_BOT_TOKEN is not set``)."""
+    sat_home = _bot_route_home(tmp_path, monkeypatch)
+    primary, bot = _primary_adapter(), _primary_adapter()
+    token = set_hermes_home_override(str(sat_home))
+    try:
+        routes = _primary_profile_routes_for_current_home()
+        shared = SharedRouteAdapters({}, routes, bot_adapters={"botowner": {Platform.DISCORD: bot}})
+        assert shared
+        assert shared.get(Platform.DISCORD, {"chat_id": "C1"}) is bot
+        assert shared.get(Platform.DISCORD, {"chat_id": "C2"}) is None  # primary route, no primary bot
+        assert shared.get(Platform.DISCORD, {"chat_id": "C9"}) is None
+        error, standalone = _run(_job("C1"), shared)
+        assert error is None, error
+        assert bot.sent == ["C1"] and standalone == []
+
+        # each route only releases ITS bot: the primary never serves the botowner route, nor botowner
+        # the primary route.
+        both = SharedRouteAdapters({Platform.DISCORD: primary}, routes,
+                                   bot_adapters={"botowner": {Platform.DISCORD: bot}})
+        assert both.get(Platform.DISCORD, {"chat_id": "C1"}) is bot
+        assert both.get(Platform.DISCORD, {"chat_id": "C2"}) is primary
+        # botowner's bot down: fail closed, never the primary
+        down = SharedRouteAdapters({Platform.DISCORD: primary}, routes, bot_adapters={"botowner": {}})
+        assert down.get(Platform.DISCORD, {"chat_id": "C1"}) is None
+        assert not SharedRouteAdapters({}, routes, bot_adapters={"botowner": {}})
+    finally:
+        reset_hermes_home_override(token)
+
+
+def test_multiplex_tick_hands_bot_profile_satellite_the_named_bot(tmp_path, monkeypatch):
+    """The ticker must build the routed view even when the PRIMARY map has no bot at all (the only
+    Discord bot belongs to a secondary profile) — before, ``and adapters`` skipped it."""
+    import threading
+
+    from cron.scheduler_provider import InProcessCronScheduler
+
+    sat_home = _bot_route_home(tmp_path, monkeypatch)
+    bot = _primary_adapter()
+    captured = {}
+    stop = threading.Event()
+
+    def _tick_and_stop(*_args, **kwargs):
+        captured["adapters"] = kwargs["adapters"]
+        stop.set()
+
+    provider = InProcessCronScheduler()
+    with patch("cron.scheduler.tick", side_effect=_tick_and_stop):
+        thread = threading.Thread(
+            target=provider.start, args=(stop,),
+            kwargs={
+                "interval": 0, "profile_homes": [("sat", sat_home)], "adapters": {},
+                "profile_adapters": {"sat": {}, "botowner": {Platform.DISCORD: bot}},
+                "default_profile": "default",
+            },
+            daemon=True,
+        )
+        thread.start()
+        thread.join(timeout=10)
+        stop.set()
+        thread.join(timeout=10)
+
+    shared = captured["adapters"]
+    assert isinstance(shared, SharedRouteAdapters)
+    assert shared.get(Platform.DISCORD, {"chat_id": "C1"}) is bot
+    assert shared.get(Platform.DISCORD, {"chat_id": "C9"}) is None
