@@ -552,13 +552,42 @@ def session_store():
     return GatewaySessionStore()
 
 
-def create_titled_session(title):
+def _launch_from_args(args):
+    """The typed launch flags on ``args`` as ``_gateway_launch`` builds them from the CLI that later
+    resumes this session (``_check_resume_launch``): a typed ``--provider`` only with ``-m``, and ``-s``
+    without the ``skills.auto_load`` names the gateway's agent loads itself."""
+    if args is None:
+        return {}
+    get = lambda key: getattr(args, key, None)
+    provider = get("provider")
+    launch = {"model": get("model"),
+              "provider": provider if get("model") and provider not in {None, "", "auto"} else None,
+              "api_key": get("api_key"), "base_url": get("base_url"), "toolsets": get("toolsets") or None,
+              "reasoning": str(get("reasoning")).strip() if get("reasoning") else None,
+              "max_turns": get("max_turns"), "checkpoints": get("checkpoints") or None,
+              "pass_session_id": get("pass_session_id") or None, "ignore_rules": get("ignore_rules") or None,
+              "run_budget": get("run_budget"), "verbose": get("verbose") or None, "skills": None}
+    from cli import _parse_skills_argument
+    requested = _parse_skills_argument(get("skills"))
+    if requested:
+        auto = set()
+        if not get("ignore_rules"):
+            from agent.skill_commands import resolve_auto_load_skills
+            from cli import CLI_CONFIG
+            auto = set(resolve_auto_load_skills(CLI_CONFIG))
+        launch["skills"] = [name for name in requested if name not in auto] or None
+    return {key: value for key, value in launch.items() if value is not None}
+
+
+def create_titled_session(title, launch_args=None):
     """``chat -c <title> --create-if-missing`` for the classic CLI: the gateway's ``session.create``
     with ``title`` (it resolves-or-creates under one owner lock), so this process writes no row.
     Main's ``_create_titled_session`` minted the id and wrote the row itself, with no cwd stamp
     (``row_cwd`` ""). Returns the id, or None when the gateway refused (the caller prints main's
-    "could not be created" copy)."""
-    params = _creation_policy({})
+    "could not be created" copy). ``launch_args`` (the parsed chat args) carry the typed launch
+    flags: the CLI then resumes the new session and refuses any flag its frozen route lacks, so a
+    session created without ``-s``/``-m``/... failed its own ``-s``/``-m`` launch."""
+    params = _creation_policy(_launch_from_args(launch_args))
     params["cwd"] = _launch_cwd()
     params["source"] = "cli"  # main's titled row is `cli` (hermes_cli.main._create_titled_session)
     params["row_cwd"] = ""

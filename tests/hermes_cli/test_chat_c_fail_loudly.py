@@ -27,7 +27,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(home))
     from hermes_cli import gateway_session_store
 
-    def create_titled(title):
+    def create_titled(title, launch_args=None):
         from hermes_state import SessionDB
         db = SessionDB()
         try:
@@ -156,7 +156,8 @@ class TestChatCFailLoudlyOnStderr:
 
         created = []
         monkeypatch.setattr(store_mod, "create_titled_session",
-                            lambda title: created.append(title) or "local-" + "a" * 64, raising=False)
+                            lambda title, launch_args=None: created.append((title, launch_args)) or "local-" + "a" * 64,
+                            raising=False)
         args = type(
             "Args",
             (),
@@ -170,7 +171,8 @@ class TestChatCFailLoudlyOnStderr:
         main_mod._resolve_continue_arg(args, use_tui=False)
 
         assert args.resume == "local-" + "a" * 64, "resume should be set to the new session id"
-        assert created == ["Bot Chat"]
+        # The launch flags (-s, -m, ...) ride the creation, so the resume that follows accepts them.
+        assert created == [("Bot Chat", args)]
         assert not (isolated_home / "state.db").exists(), "the CLI must not write the titled row itself"
 
     def test_tui_create_if_missing_keeps_the_local_titled_row(self, isolated_home):
