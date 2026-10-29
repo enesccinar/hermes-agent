@@ -420,6 +420,31 @@ def test_create_if_missing_titles_a_gateway_created_session(store, monkeypatch):
     assert params["title"] == "Fresh Named" and params["source"] and params["cwd"]
 
 
+def test_create_if_missing_creates_with_the_launch_flags_the_resume_then_checks(store, monkeypatch):
+    """``chat -s X -c NAME --create-if-missing``: the titled session is created with the typed launch
+    flags (as ``_gateway_launch`` sends them), so the resume that follows does not refuse its own
+    ``-s``/``-m``/``--max-turns`` as a policy change. ``skills.auto_load`` names stay the gateway's."""
+    import argparse
+    from hermes_cli import gateway_session_store as gss
+    from hermes_cli.gateway_chat import check_resume_policy
+    monkeypatch.setattr("agent.skill_commands.resolve_auto_load_skills", lambda config=None: ["pinned"])
+    db, client = store
+    monkeypatch.setattr(gss, "session_store", lambda: db)
+    args = argparse.Namespace(skills=["pinned,mai-cto-plan-control"], model="m1", provider="p1", max_turns=7,
+                              reasoning="high", toolsets="file,web", checkpoints=False, run_budget=None)
+    assert gss.create_titled_session("Fresh Named", args) == "local-new"
+    params = [p for m, p in client.calls if m == "session.create"][-1]
+    assert (params["skills"], params["model"], params["provider"], params["max_turns"], params["reasoning"],
+            params["toolsets"]) == (["mai-cto-plan-control"], "m1", "p1", 7, "high", ["file", "web"]), params
+    assert "checkpoints" not in params and "run_budget" not in params
+    frozen = {k: v for k, v in params.items() if k in gss._LAUNCH_POLICY}
+    check_resume_policy(argparse.Namespace(skills=["mai-cto-plan-control"], max_turns=7),
+                        {"info": {"launch_request": frozen}})
+    # A typed --provider without -m is not launch policy (``_gateway_launch``): the gateway resolves it.
+    gss.create_titled_session("Other", argparse.Namespace(provider="p1"))
+    assert "provider" not in [p for m, p in client.calls if m == "session.create"][-1]
+
+
 def test_bare_continue_finds_the_last_session_the_cli_created(tmp_path, monkeypatch):
     """Bare ``-c`` (main.py ``_resolve_last_session``) reads main's labels too: a gateway row labelled
     ``local`` that the CLI created is CLI history."""
