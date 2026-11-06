@@ -953,6 +953,21 @@ def check_vision_requirements() -> bool:
     return _should_use_native_vision_fast_path() or check_video_requirements()
 
 
+def predescribed_image_followup_hint(path: str) -> str:
+    """Follow-up hint appended after an image was already described by the aux vision model.
+
+    Shared by the gateway, CLI and non-vision agent paths. A bare "use vision_analyze for a closer look"
+    made models re-read the whole original right away (one turn: 190 s on a local model, or a second
+    paid call); the description already came from the vision model, so steer follow-ups to a crop.
+    """
+    return (
+        "[This description already came from the vision model. Answer from it. "
+        "Do not re-run vision_analyze on the whole image. Only if a detail is missing, call "
+        f"vision_analyze with image_url: {path} and a region crop, or run mac-ocr on that path "
+        "for exact text.]"
+    )
+
+
 from tools.registry import registry, tool_error
 
 VISION_ANALYZE_SCHEMA = {

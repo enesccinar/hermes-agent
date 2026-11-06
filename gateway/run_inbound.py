@@ -1843,7 +1843,7 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         """Auto-analyze user-attached images with the vision tool and prepend the descriptions.
         Description *and* local cache path are injected so the model understands the image without
         a tool call and can re-examine it with vision_analyze."""
-        from tools.vision_tools import vision_analyze_tool
+        from tools.vision_tools import vision_analyze_tool, predescribed_image_followup_hint
         from agent.memory_context import sanitize_context
 
         analysis_prompt = (
@@ -1862,8 +1862,7 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
                     description = sanitize_context(result.get("analysis", ""))
                     note = (
                         f"[The user sent an image~ Here's what I can see:\n{description}]\n"
-                        f"[If you need a closer look, use vision_analyze with "
-                        f"image_url: {path} ~]"
+                        f"{predescribed_image_followup_hint(path)}"
                     )
                 else:
                     note = (

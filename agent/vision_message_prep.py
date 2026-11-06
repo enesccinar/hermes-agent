@@ -125,7 +125,12 @@ class VisionMessagePrepMixin:
 
         note = f"[The {role_label} attached an image. Here's what it contains:\n{description or 'Image analysis failed.'}]"
         if vision_source and not is_data_url:
-            note += f"\n[If you need a closer look, use vision_analyze with image_url: {vision_source}]"
+            if description and not description.startswith("Image analysis failed"):
+                from tools.vision_tools import predescribed_image_followup_hint
+
+                note += "\n" + predescribed_image_followup_hint(vision_source)
+            else:
+                note += f"\n[If you need a closer look, use vision_analyze with image_url: {vision_source}]"
 
         self._anthropic_image_fallback_cache[cache_key] = note
         return note

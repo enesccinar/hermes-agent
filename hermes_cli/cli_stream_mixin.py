@@ -637,7 +637,7 @@ class CLIStreamMixin:
         from cli import _DIM, _RST, _cprint
         import asyncio as _asyncio
         from gateway.warning_notifications import render_notification
-        from tools.vision_tools import vision_analyze_tool
+        from tools.vision_tools import vision_analyze_tool, predescribed_image_followup_hint
         analysis_prompt = (
             "Describe everything visible in this image in thorough detail. "
             "Include any text, code, data, objects, people, layout, colors, "
@@ -657,8 +657,7 @@ class CLIStreamMixin:
                     description = result.get("analysis", "")
                     enriched_parts.append(
                         f"[The user attached an image. Here's what it contains:\n{description}]\n"
-                        f"[If you need a closer look, use vision_analyze with "
-                        f"image_url: {img_path}]")
+                        f"{predescribed_image_followup_hint(str(img_path))}")
                     if announce:
                         _cprint(f"  {_DIM}{t('cli.stream.vision_analyzed')}{_RST}")
                 else:
