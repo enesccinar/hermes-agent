@@ -285,6 +285,22 @@ class TestPreloadResumedSession:
 
 
 
+    def test_title_with_rich_markup_brackets_is_printed_literally(self):
+        """A title like ``[/plan — plan mode]`` must not be parsed as Rich markup
+        (MarkupError: closing tag ... doesn't match any open tag)."""
+        cli = _make_cli(resume="bracket_session")
+        messages = [{"role": "user", "content": "hi"}]
+        mock_db = MagicMock()
+        mock_db.get_session.return_value = {"id": "bracket_session", "title": "[/plan — plan mode]"}
+        mock_db.get_resume_conversations.return_value = (messages, messages)
+        mock_db.resolve_resume_session_id.return_value = "bracket_session"
+        cli._session_db = mock_db
+
+        buf = StringIO()
+        cli.console.file = buf
+        assert cli._preload_resumed_session() is True
+        assert '"[/plan — plan mode]"' in buf.getvalue()
+
     def test_reopens_session_in_db(self):
         cli = _make_cli(resume="reopen_session")
         messages = [{"role": "user", "content": "hi"}]

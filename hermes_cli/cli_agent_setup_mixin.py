@@ -849,7 +849,7 @@ class CLIAgentSetupMixin:
         resume_limit_error = self._resume_history_limit_error()
         if resume_limit_error:
             self._resume_history_error = resume_limit_error
-            self._console_print(f"[bold red]{_escape(t('cli.resume.cannot_resume_prefix'))}[/] {resume_limit_error}")
+            self._console_print(f"[bold red]{_escape(t('cli.resume.cannot_resume_prefix'))}[/] {_escape(resume_limit_error)}")
             return False
         restored, display_history = self._session_db.get_resume_conversations(self._resume_read_id)
         accent_color = _accent_hex()
@@ -866,8 +866,8 @@ class CLIAgentSetupMixin:
         msg_count = len([m for m in self._resume_display_history if is_user_originated_turn(m)])
         title_part = f' "{session_meta["title"]}"' if session_meta.get("title") else ""
         self._console_print(
-            f"[{accent_color}]{_escape(t('cli.resume.resumed_session'))} [bold]{self.session_id}[/bold]"
-            f"{title_part} {_resume_counts(msg_count, len(restored))}[/]")
+            f"[{accent_color}]{_escape(t('cli.resume.resumed_session'))} [bold]{_escape(self.session_id)}[/bold]"
+            f"{_escape(title_part)} {_resume_counts(msg_count, len(restored))}[/]")
         self._restore_session_state(session_meta)
         self._reopen_session()
         return True
