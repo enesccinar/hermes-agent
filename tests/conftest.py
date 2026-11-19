@@ -187,6 +187,9 @@ except AttributeError:
 # open a real DB must export HERMES_STATE_DB_GUARD_BYPASS=1 in that child's
 # env instead of stripping markers.
 os.environ["HERMES_TEST_ISOLATION"] = os.environ.get("HERMES_HOME", "") or "1"
+# A real ~/.cinar-world/secrets/hermes-<profile>.json would replace a test profile's .env
+# (hermes_cli.world_secrets); point the World home at a path that never exists.
+os.environ["CINAR_WORLD_HOME"] = os.path.join(tempfile.gettempdir(), "hermes-test-no-cinar-world")
 
 # Lazy-install kill-switch, set before any test module is imported. The per-test
 # fixture below sets it too, but collection runs first: agent/bedrock_adapter.py

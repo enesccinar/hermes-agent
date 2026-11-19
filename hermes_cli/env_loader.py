@@ -104,6 +104,25 @@ def _env_keys_defined_in_dotenv(path: Path) -> set[str]:
     return set(load_env_file(path))
 
 
+class _Literal(str):
+    """A value from the World secret store: taken as is, never ``${VAR}``-expanded."""
+
+
+def _world_assignments(path: Path) -> list[tuple[str, str | None]] | None:
+    """A profile ``.env``'s World scope values as dotenv assignments, or None when the file is the source."""
+    from hermes_cli.world_secrets import read_for_env_path
+
+    world = read_for_env_path(path)
+    return None if world is None else [(name, _Literal(value)) for name, value in world.items()]
+
+
+def _home_env_present(path: Path) -> bool:
+    """The profile's ``.env`` layer exists: the file itself or the World scope that replaces it."""
+    from hermes_cli.world_secrets import secrets_file_for_env_path
+
+    return secrets_file_for_env_path(path) is not None or path.exists()
+
+
 def _clear_known_keys_missing_from_dotenv(path: Path) -> None:
     """After ``.env`` loaded with override, delete inherited ``_PROFILE_MANAGED_ENV_KEYS`` it does not
     define. Deliberately NARROW: only keys that change *which provider path* is used.
@@ -111,7 +130,7 @@ def _clear_known_keys_missing_from_dotenv(path: Path) -> None:
     Does **not** run when the ``.env`` file does not exist (bare-profile case, which follows ``#66930`` /
     ``#67027`` semantics).
     """
-    if not path.exists():
+    if not _home_env_present(path):
         return
     defined = _env_keys_defined_in_dotenv(path)
     for key in _PROFILE_MANAGED_ENV_KEYS:
@@ -349,6 +368,9 @@ def _sanitize_loaded_credentials() -> None:
 
 def _parse_dotenv_file(path: Path) -> list[tuple[str, str | None]]:
     """``(name, raw value)`` assignments of one dotenv file, uninterpolated, in file order."""
+    world = _world_assignments(path)
+    if world is not None:
+        return world
     raw = path.read_bytes()
     try:
         # utf-8-sig strips a leading BOM (PowerShell 5.1 / Notepad); plain utf-8 would keep U+FEFF on the
@@ -387,7 +409,7 @@ def _resolve_dotenv_assignments(
 
     resolved: dict[str, str | None] = {}
     for name, value in assignments:
-        if value is not None:
+        if value is not None and not isinstance(value, _Literal):
             lookup = {**lookup_env, **resolved} if override else {**resolved, **lookup_env}
             value = "".join(atom.resolve(lookup) for atom in parse_variables(value))
         resolved[name] = value
@@ -455,6 +477,9 @@ def _dotenv_assignments(path: Path) -> list:
     """``(name, raw value)`` pairs of one dotenv file as the loader will see it once
     ``_sanitize_env_file_if_needed`` has run: :func:`_parse_dotenv_file` plus the sanitizer's UTF-16
     rewrite and NUL strip, for the pre-boot bootstrap reads that run before the sanitizer."""
+    world = _world_assignments(path)
+    if world is not None:
+        return world
     raw = path.read_bytes()
     if raw.startswith(codecs.BOM_UTF16_LE) or raw.startswith(codecs.BOM_UTF16_BE):
         # Notepad "Unicode": ``_sanitize_env_file_if_needed`` rewrites it as UTF-8 before the loader
@@ -495,7 +520,7 @@ def _bootstrap_env(home: Path | None = None, project_env: Path | None = None) ->
     if not os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
         layers.append((home / ".op.env", False))
     if project_env is not None:
-        layers.append((Path(project_env), not user_env.exists()))
+        layers.append((Path(project_env), not _home_env_present(user_env)))
     try:
         from hermes_cli import managed_scope
 
@@ -713,7 +738,7 @@ def load_hermes_dotenv(
     if project_env_path and project_env_path.exists():
         _sanitize_env_file_if_needed(project_env_path)
 
-    if user_env.exists() and _load_user_dotenv(user_env, load_pass=load_pass):
+    if _home_env_present(user_env) and _load_user_dotenv(user_env, load_pass=load_pass):
         loaded.append(user_env)
         _clear_known_keys_missing_from_dotenv(user_env)  # mirrors reload_env(): inherited keys must not leak
 
@@ -725,7 +750,7 @@ def load_hermes_dotenv(
         _load_dotenv_with_fallback(op_env, override=False, load_pass=load_pass)
 
     if project_env_path and project_env_path.exists():
-        _load_dotenv_with_fallback(project_env_path, override=not user_env.exists(), load_pass=load_pass)
+        _load_dotenv_with_fallback(project_env_path, override=not _home_env_present(user_env), load_pass=load_pass)
         loaded.append(project_env_path)
 
     # The override=True loads above wrote the raw .env line (``__BITWARDEN_MANAGED__`` placeholder, stale
