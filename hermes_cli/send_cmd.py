@@ -170,7 +170,8 @@ def _load_hermes_env() -> None:
     else:
         target = os.environ
         env_path = home / ".env"
-        if env_path.exists():
+        from hermes_cli.world_secrets import env_layer_exists
+        if env_layer_exists(env_path):  # the .env, or the World scope file that replaces it
             try:
                 from hermes_cli.env_loader import _load_dotenv_with_fallback
                 _load_dotenv_with_fallback(env_path, override=True)

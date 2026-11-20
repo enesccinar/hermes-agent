@@ -122,20 +122,13 @@ def _remove_env_source(provider: str, removed) -> RemovalResult:
     if not env_var:
         return result
 
-    # Detect shell vs .env BEFORE remove_env_value pops os.environ. Read the
-    # .env as utf-8-sig like hermes_cli/config.py: a BOM-sensitive read would
-    # misreport a Notepad-edited .env var as a shell export.
+    # Detect shell vs .env BEFORE remove_env_value pops os.environ. load_env_file reads the
+    # profile's World scope file when it replaces the .env, else the .env (BOM-tolerant).
+    from agent.secret_scope import load_env_file
+
     env_in_process = bool(os.getenv(env_var))
-    env_in_dotenv = False
-    try:
-        env_path = get_env_path()
-        if env_path.exists():
-            env_in_dotenv = any(
-                line.strip().startswith(f"{env_var}=")
-                for line in env_path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
-            )
-    except OSError:
-        pass
+
+    env_in_dotenv = env_var in load_env_file(get_env_path())
 
     if remove_env_value(env_var):
         result.cleaned.append(f"Cleared {env_var} from .env")

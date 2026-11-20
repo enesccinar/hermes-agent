@@ -76,6 +76,11 @@ def secrets_file_for_env_path(env_path: str | os.PathLike) -> Path | None:
     return None
 
 
+def env_layer_exists(env_path: str | os.PathLike) -> bool:
+    """The profile's ``.env`` layer exists: the World scope file that replaces it, or the file itself."""
+    return secrets_file_for_env_path(env_path) is not None or Path(env_path).exists()
+
+
 def _warn_once(key: str, message: str) -> None:
     if key not in _WARNED:
         _WARNED.add(key)

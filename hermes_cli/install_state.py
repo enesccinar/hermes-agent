@@ -401,11 +401,13 @@ def _provider_key(home: _Root) -> bool:
     from hermes_cli.config_defaults import OPTIONAL_ENV_VARS
 
     from agent.secret_scope import load_env_file
+    from hermes_cli.world_secrets import secrets_file_for_env_path
 
     path = home.file(".env")
-    if not path.is_file():
+    world_file = secrets_file_for_env_path(path)  # replaces the .env when it exists
+    if world_file is None and not path.is_file():
         return False
-    _read_text(path)  # too large or unreadable raises, so doubt counts as used; the tokenizer swallows both
+    _read_text(world_file or path)  # too large or unreadable raises, so doubt counts as used; the tokenizer swallows both
     return any(value and key not in _IGNORED_ENV_KEYS
                and (OPTIONAL_ENV_VARS.get(key) or {}).get("category") in _USER_ENV_CATEGORIES
                for key, value in load_env_file(path).items())

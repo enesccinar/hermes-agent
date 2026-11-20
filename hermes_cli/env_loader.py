@@ -118,9 +118,9 @@ def _world_assignments(path: Path) -> list[tuple[str, str | None]] | None:
 
 def _home_env_present(path: Path) -> bool:
     """The profile's ``.env`` layer exists: the file itself or the World scope that replaces it."""
-    from hermes_cli.world_secrets import secrets_file_for_env_path
+    from hermes_cli.world_secrets import env_layer_exists
 
-    return secrets_file_for_env_path(path) is not None or path.exists()
+    return env_layer_exists(path)
 
 
 def _clear_known_keys_missing_from_dotenv(path: Path) -> None:

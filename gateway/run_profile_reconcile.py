@@ -62,6 +62,14 @@ def profile_serve_signature(home: Path) -> tuple:
             sig.append(file_cache_version(Path(home) / name, always_digest=True))
         except OSError:
             sig.append(None)
+    # The profile's World scope file replaces its .env once it exists: a token rotated there must
+    # re-scan the profile's adapters just as a .env edit does.
+    from hermes_cli.world_secrets import secrets_file_for_env_path
+    world_file = secrets_file_for_env_path(Path(home) / ".env")
+    try:
+        sig.append(None if world_file is None else file_cache_version(world_file, always_digest=True))
+    except OSError:
+        sig.append(None)
     return tuple(sig)
 
 
