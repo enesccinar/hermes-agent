@@ -136,15 +136,18 @@ def build_profile_terminal_scope(
     scope = default_terminal_scope()
     default_image = scope.get("TERMINAL_DOCKER_IMAGE")
     env_path = home / ".env"
-    if env_path.exists():
+    from hermes_cli.world_secrets import secrets_file_for_env_path
+    # The profile's World scope file, when it exists, replaces the .env (load_env_file reads it).
+    env_source = secrets_file_for_env_path(env_path) or env_path
+    if env_source.exists():
         # load_env_file swallows OSError by design (secret scope fails soft); an unreadable
         # profile .env must fail closed here, unless managed scope pins the backend: a sandbox
         # launcher withholds the .env and pins the backend there, and load_env_file reads it as {}.
         try:
-            env_path.read_bytes()
+            env_source.read_bytes()
         except Exception as exc:
             if not isinstance(exc, PermissionError) or managed_scope.pinned_terminal_backend() is None:
-                raise TerminalPolicyUnavailable(f"cannot read {env_path}: {exc}") from exc
+                raise TerminalPolicyUnavailable(f"cannot read {env_source}: {exc}") from exc
         from agent.secret_scope import load_env_file
 
         profile_env = load_env_file(env_path)

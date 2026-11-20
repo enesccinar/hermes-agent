@@ -1055,21 +1055,15 @@ def _termux_should_prefetch_update_check() -> bool:
 
 
 def _dotenv_has_provider_key(env_file: Path, provider_env_vars: set) -> bool:
-    """True if ~/.hermes/.env assigns a non-empty value to any provider key."""
-    if not env_file.exists():
-        return False
+    """True if ~/.hermes/.env (or the World scope file replacing it) assigns a non-empty value to any
+    provider key."""
+    from agent.secret_scope import load_env_file
+
     try:
-        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
-            line = line.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            line = line.removeprefix("export ")
-            key, _, val = line.partition("=")
-            if key.strip() in provider_env_vars and val.strip().strip("'\""):
-                return True
+        values = load_env_file(env_file)
     except Exception:
-        pass
-    return False
+        return False
+    return any(str(values.get(key) or "").strip() for key in provider_env_vars)
 
 
 def _auth_store_logged_in(auth_file: Path, registry, strict_profile_scope: bool) -> bool:

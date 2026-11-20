@@ -1483,10 +1483,12 @@ def backfill_profile_envs(quiet: bool = False) -> list[str]:
     overwrites an existing file. It never copies the default's ``.env``: secrets are
     profile-scoped, and a copied bot token makes two adapters fight over one bot.
     """
+    from hermes_cli.world_secrets import env_layer_exists
+
     backfilled: list[str] = []
     for entry in _iter_named_profile_dirs():
         env_path = entry / ".env"
-        if env_path.exists():
+        if env_layer_exists(env_path):  # a World scope file replaces the .env: nothing to seed
             continue
         try:
             env_path.write_text(_PLACEHOLDER_ENV, encoding="utf-8")

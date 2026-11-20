@@ -245,11 +245,14 @@ def credential_env_keys() -> dict[str, str]:
 def _env_values(env_path: Path, wanted: Optional[dict[str, str]] = None) -> dict[str, str]:
     """Non-blank assignments in ``env_path`` (restricted to ``wanted`` keys when given)."""
     values: dict[str, str] = {}
-    if not env_path.is_file():
+    from hermes_cli.world_secrets import read_for_env_path
+    world = read_for_env_path(env_path)  # a profile's World scope file stands in for its .env
+    if world is None and not env_path.is_file():
         return values
     from dotenv import dotenv_values
     with contextlib.suppress(Exception):
-        for key, value in (dotenv_values(env_path, encoding="utf-8-sig") or {}).items():
+        source = world if world is not None else (dotenv_values(env_path, encoding="utf-8-sig") or {})
+        for key, value in source.items():
             if (wanted is None or key in wanted) and value and value.strip():
                 values[key] = value.strip()
     return values
@@ -456,12 +459,19 @@ def channel_platforms_configured(profile_dir: Path) -> list[str]:
     index = ChannelKeyIndex(profile_dir)
     found: set[str] = set()
     env_path = profile_dir / ".env"
-    if env_path.is_file():
-        for line in env_path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
-            key = _env_key_of_line(line)
-            platform = index.platform_for(key) if key else None
-            if platform and platform != GATEWAY_POLICY_ID:
-                found.add(platform)
+    from hermes_cli.world_secrets import read_for_env_path
+    world = read_for_env_path(env_path)  # a profile's World scope file stands in for its .env
+    if world is not None:
+        env_keys = list(world)
+    elif env_path.is_file():
+        env_keys = [_env_key_of_line(line) for line in
+                    env_path.read_text(encoding="utf-8-sig", errors="replace").splitlines()]
+    else:
+        env_keys = []
+    for key in env_keys:
+        platform = index.platform_for(key) if key else None
+        if platform and platform != GATEWAY_POLICY_ID:
+            found.add(platform)
     config_path = profile_dir / "config.yaml"
     if config_exists(config_path):
         from hermes_cli.config import read_user_config_raw
