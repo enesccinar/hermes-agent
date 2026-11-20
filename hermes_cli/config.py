@@ -32,7 +32,7 @@ import hermes_yaml as yaml
 
 from hermes_cli.cli_output import line_input
 from hermes_cli.colors import Colors, color
-from hermes_cli import managed_scope
+from hermes_cli import managed_scope, world_secrets
 from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
 from hermes_cli.left_core_migration import profile_env_names as _left_core_profile_env
 from hermes_cli.secret_prompt import masked_secret_prompt
@@ -2695,6 +2695,8 @@ def save_env_value(key: str, value: str):
     value = _check_non_ascii_credential(key, value)
     ensure_hermes_home()
     env_path = get_env_path()
+    if world_secrets.save_for_env_path(env_path, key, value) is not None:
+        return
 
     with _env_write_lock(env_path):
         lines = _read_env_lines(env_path) if env_path.exists() else []
@@ -2729,6 +2731,8 @@ def remove_env_value(key: str) -> bool:
     if not _ENV_VAR_NAME_RE.match(key):
         raise ValueError(f"Invalid environment variable name: {key!r}")
     env_path = get_env_path()
+    if (found := world_secrets.save_for_env_path(env_path, key, None)) is not None:
+        return found
     if not env_path.exists():
         _publish_env_value(key, None)
         return False
@@ -2771,10 +2775,6 @@ def save_env_value_secure(key: str, value: str) -> dict[str, Any]:
     """Save via the unified credential lifecycle (also refreshes any config.yaml mirror of the old
     value and lifts a prior env-source suppression)."""
     from hermes_cli.credential_lifecycle import save_provider_env_credential
-
-    # Route through the unified credential lifecycle so a rotation via the secret-capture path also
-    # refreshes any config.yaml mirror of the old value and lifts a prior env-source suppression (#62269 fix
-    # family).
     save_provider_env_credential(key, value)
     return {"success": True, "stored_as": key, "validated": False}
 

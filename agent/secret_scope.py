@@ -381,6 +381,11 @@ def load_env_file(env_path: Path) -> dict[str, str]:
     returns a fresh dict: callers mutate what they get back (``build_profile_secret_scope`` layers
     external secrets over it).
     """
+    from hermes_cli.world_secrets import read_for_env_path
+
+    world = read_for_env_path(env_path)  # a profile's World scope file stands in for its .env
+    if world is not None:
+        return world
     key = str(env_path)
     try:
         with open(env_path, "rb") as handle:
