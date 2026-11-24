@@ -98,6 +98,27 @@ class TestFireStreamDeltaEmptiness:
         assert delivered[-1] == "again"
         assert agent._current_streamed_assistant_text == "again"
 
+    def test_lone_newline_survives_when_the_sink_refuses_deltas(self):
+        # A finite `chat -q` viewer's gateway callback shows each delta, then raises so the
+        # agent treats it as undelivered. Nothing is recorded, and lone "\n" tokens used to be
+        # stripped as if each were the first delta, gluing list lines together.
+        agent = _make_agent()
+        shown = []
+
+        def refusing_sink(text):
+            shown.append(text)
+            raise RuntimeError("no stream consumer")
+
+        agent.stream_delta_callback = refusing_sink
+        agent._stream_callback = None
+        for piece in ["\n", "- alpha 2026", "\n", "- beta 2026", "\n", "- gamma (2)\n", "- delta"]:
+            agent._fire_stream_delta(piece)
+        assert "".join(shown) == "- alpha 2026\n- beta 2026\n- gamma (2)\n- delta"
+        assert agent._current_streamed_assistant_text == ""
+        agent._current_streamed_assistant_text = ""
+        agent._fire_stream_delta("\n\nnext response")
+        assert shown[-1] == "next response"
+
 
 
 if __name__ == "__main__":
