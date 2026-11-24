@@ -218,6 +218,14 @@ def profile_env_scope(home=None):
         reset_secret_scope(token)
 
 
+def _is_hermes_root(path) -> bool:
+    from hermes_constants import get_default_hermes_root
+    try:
+        return path.resolve() == get_default_hermes_root().resolve()
+    except OSError:
+        return False
+
+
 def project_plugins_warning(policy):
     """The plain notice for a session whose client opted into project plugins (its forwarded
     ``HERMES_ENABLE_PROJECT_PLUGINS``) in a folder that has some: the gateway never loads them."""
@@ -227,6 +235,8 @@ def project_plugins_warning(policy):
     env = policy.client_env() if policy is not None and not policy.client_env_remote else None
     folder = Path(policy.cwd) / '.hermes' / 'plugins' if env else None
     if not env or not is_truthy_value(env.get('HERMES_ENABLE_PROJECT_PLUGINS')) or not folder.is_dir():
+        return None
+    if _is_hermes_root(folder.parent):  # run from $HOME: that is the user plugins folder, which loads
         return None
     try:
         if not any(folder.iterdir()):

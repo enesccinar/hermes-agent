@@ -56,6 +56,11 @@ async def test_an_opted_in_session_is_told_project_plugins_do_not_load(tmp_path,
         assert create('unset', repo, client_env={}) is None
         assert create('empty', plain, client_env={'HERMES_ENABLE_PROJECT_PLUGINS': '1'}) is None
         assert create('desktop', repo) is None  # a client that sends no environment
+        user = tmp_path / 'user'  # run from $HOME: ./.hermes is the Hermes root, its plugins load
+        (user / '.hermes' / 'plugins' / 'mine').mkdir(parents=True)
+        import hermes_constants
+        monkeypatch.setattr(hermes_constants, 'get_default_hermes_root', lambda **_: user / '.hermes')
+        assert create('home', user, client_env={'HERMES_ENABLE_PROJECT_PLUGINS': '1'}) is None
     finally:
         await connection.close()
         owner.db.close()
