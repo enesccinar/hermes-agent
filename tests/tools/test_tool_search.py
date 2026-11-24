@@ -308,6 +308,41 @@ class TestRelevanceFloor:
         assert hits and hits[0].name == "github_create_issue"
 
 
+class TestUnknownWordGate:
+    """The gate is the rarest ANSWERABLE token: a word no document carries has the
+    highest IDF of all, and gating on it admitted nothing."""
+
+    def _catalog(self):
+        from tools.tool_search import build_catalog
+        defs = [
+            _td("email_search", "Search Gmail messages by sender, subject or email text",
+                {"query": {"type": "string"}}),
+            _td("incident_notify", "Send the on-call team an email about an incident",
+                {"incident_id": {"type": "string"}}),
+            _td("incident_escalate", "Escalate an incident and send the owner an email",
+                {"incident_id": {"type": "string"}}),
+            _td("slack_send_message", "Post a message into a Slack channel",
+                {"channel": {"type": "string"}, "text": {"type": "string"}}),
+        ]
+        return build_catalog(defs)
+
+    def test_unknown_word_does_not_blank_a_query_whose_rare_word_matches(self):
+        from tools.tool_search import search_catalog
+        # "inbox" and "address" are in no document; "gmail" is in exactly one.
+        hits = search_catalog(
+            self._catalog(), "gmail search messages inbox email address", limit=5)
+        assert [h.name for h in hits] == ["email_search"]
+
+    def test_query_of_only_unknown_words_returns_nothing(self):
+        from tools.tool_search import search_catalog
+        assert search_catalog(self._catalog(), "inbox address zebra", limit=5) == []
+
+    def test_rare_word_still_gates_out_common_word_matches(self):
+        from tools.tool_search import search_catalog
+        hits = search_catalog(self._catalog(), "send gmail email", limit=5)
+        assert [h.name for h in hits] == ["email_search"]
+
+
 # ---------------------------------------------------------------------------
 # Assembly — the full passthrough/activate decision.
 # ---------------------------------------------------------------------------
