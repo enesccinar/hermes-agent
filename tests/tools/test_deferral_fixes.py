@@ -272,9 +272,9 @@ class TestSourceNameIndexing:
 
 
     def test_unknown_token_returns_nothing(self):
-        """A token no document carries is the query's rarest token, so it gates and nothing
-        is admitted: an empty group, not `limit` tools sharing a common word. The old
-        name-substring fallback ("hub" -> github_*) is gone with it; the substring path
+        """A query whose tokens no document carries admits nothing. An unknown token beside
+        answerable ones does not gate; the rarest answerable token does. The old
+        name-substring fallback ("hub" -> github_*) stays gone; the substring path
         admitted tools that matched no query token at all."""
         from tools.registry import registry
 
@@ -288,7 +288,8 @@ class TestSourceNameIndexing:
             catalog = build_catalog(defs)
             assert search_catalog(catalog, "zzzz") == []
             assert search_catalog(catalog, "hub") == []
-            assert search_catalog(catalog, "create zzzz issue") == []
+            assert [h.name for h in search_catalog(catalog, "create zzzz issue")] == [
+                "github_create_issue"]
         finally:
             for n in names:
                 registry.deregister(n)

@@ -89,13 +89,15 @@ class TestStemming:
         names = [h.name for h in search_catalog(catalog, "linear issue slack", limit=5)]
         assert names == ["mq_slack_post_message"]
 
-    def test_token_no_document_carries_admits_nothing(self, issue_defs):
-        """'send gmail email' against a catalog with no gmail tool returns nothing rather
-        than five tools that merely share 'message' or 'email'."""
+    def test_token_no_document_carries_does_not_gate(self, issue_defs):
+        """'gmail' is in no document, so it cannot gate: the rarest answerable token does,
+        and only the tool carrying it comes back. A query of only unknown words is empty."""
         from tools.tool_search import build_catalog, search_catalog
 
         catalog = build_catalog(issue_defs)
-        assert search_catalog(catalog, "post gmail message", limit=5) == []
+        names = [h.name for h in search_catalog(catalog, "post gmail message", limit=5)]
+        assert names == ["mq_slack_post_message"]
+        assert search_catalog(catalog, "gmail inbox", limit=5) == []
 
 
     def test_parallel_tokenize_search_and_dispatch_are_deterministic(self, issue_defs):
