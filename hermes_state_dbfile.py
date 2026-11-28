@@ -221,6 +221,7 @@ _DARWIN_ALL_PIDS = 1
 _DARWIN_PIDLISTFDS = 1
 _DARWIN_PIDFDVNODEPATHINFO = 2
 _DARWIN_PROC_FD_INFO_SIZE = 8  # struct proc_fdinfo { int32 proc_fd; uint32 proc_fdtype; }
+_DARWIN_PROX_FDTYPE_VNODE = 1
 _DARWIN_FD_RECORD_SIZE = 1200  # PROC_PIDFDVNODEPATHINFO_SIZE
 # Field offsets inside that 1200-byte record.  libproc does not lay the header's structs out
 # verbatim (it pads ``vnode_info`` and sizes the record to 1200, not to ``sizeof``'s 1192), so
@@ -299,7 +300,9 @@ def _iter_darwin_fd_targets():
         else:
             continue
         for offset in range(0, used - _DARWIN_PROC_FD_INFO_SIZE + 1, _DARWIN_PROC_FD_INFO_SIZE):
-            fd = struct.unpack_from("<i", listing.raw, offset)[0]
+            fd, fdtype = struct.unpack_from("<iI", listing.raw, offset)
+            if fdtype != _DARWIN_PROX_FDTYPE_VNODE:
+                continue  # sockets, pipes, kqueues: no pathname, and one fewer kernel call each
             record = ctypes.create_string_buffer(_DARWIN_FD_RECORD_SIZE)
             if lib.proc_pidfdinfo(pid, fd, _DARWIN_PIDFDVNODEPATHINFO, record,
                                   _DARWIN_FD_RECORD_SIZE) <= 0:
@@ -322,34 +325,78 @@ def _iter_darwin_sidecar_holders(db_path) -> list[tuple[int, str]]:
     # APFS/HFS+ are case-insensitive by default and libproc reports the pathname as the opener
     # spelled it; ``os.path.normcase`` is the identity on darwin, so fold case here.
     watched = {path.casefold(): path for path in (base + "-wal", base + "-shm")}
-    holders: list[tuple[int, str]] = []
-    errors: list[BaseException] = []
-
-    def _scan() -> None:
-        try:
-            for pid, _fd, target, identity in _iter_darwin_fd_targets():
-                literal = watched.get(target.casefold())
-                if literal is not None and _identity_is_truly_unlinked(identity, literal):
-                    holders.append((pid, target))
-        except BaseException as exc:
-            errors.append(exc)
-
-    # ponytail: abandoned daemon thread per timed-out scan; a kernel-blocked
-    # proc_pidfdinfo cannot be interrupted, so expiry leaks one thread that
-    # dies with the process. Fail open: partial/empty holders, never a refusal.
-    worker = threading.Thread(target=_scan, daemon=True)
-    worker.start()
-    worker.join(_DARWIN_FD_SCAN_TIMEOUT_SECONDS)
-    if worker.is_alive():
-        logger.warning(
-            "deleted-WAL holder scan timed out after %.1fs for %s; continuing fail-open",
-            _DARWIN_FD_SCAN_TIMEOUT_SECONDS,
-            db_path,
-        )
+    targets = _darwin_sidecar_fd_targets()
+    if targets is None:
         return []
-    if errors:
-        raise errors[0]
+    holders: list[tuple[int, str]] = []
+    for pid, target, identity in targets:
+        literal = watched.get(target.casefold())
+        if literal is not None and _identity_is_truly_unlinked(identity, literal):
+            holders.append((pid, target))
     return holders
+
+
+class _DarwinFdScan:
+    """One libproc pass over every process's descriptors, shared by every caller that asks while it runs.
+
+    Every state.db open runs the guard, and a multiplexed gateway opens one per profile at once. A
+    machine with a process holding hundreds of thousands of vnodes (a VM's file-sharing daemon) makes
+    one pass take longer than the budget; one abandoned thread per caller then piles up dozens of
+    passes contending for the GIL until the event loop misses its liveness probes. So at most one pass
+    runs per process: callers during a pass wait on it (within their budget), and once a pass has
+    overrun, callers fail open at once instead of queueing behind it until it ends."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.worker: threading.Thread | None = None
+        self.done = threading.Event()
+        self.overran = False
+        self.targets: list[tuple[int, str, tuple[int, int]]] = []
+        self.error: BaseException | None = None
+
+
+_DARWIN_FD_SCAN: _DarwinFdScan | None = None
+_DARWIN_FD_SCAN_LOCK = threading.Lock()
+
+
+def _darwin_sidecar_fd_targets() -> list[tuple[int, str, tuple[int, int]]] | None:
+    """``(pid, last pathname, identity)`` for every ``-wal``/``-shm`` vnode fd, or None when the pass
+    did not finish within ``_DARWIN_FD_SCAN_TIMEOUT_SECONDS`` (the caller fails open)."""
+    global _DARWIN_FD_SCAN
+    with _DARWIN_FD_SCAN_LOCK:
+        scan = _DARWIN_FD_SCAN
+        if scan is not None and scan.done.is_set():
+            scan = None  # finished: results go stale at once, so the next caller starts a fresh pass
+        if scan is not None and scan.overran:
+            return None
+        if scan is None:
+            scan = _DARWIN_FD_SCAN = _DarwinFdScan()
+
+            def _run(state: _DarwinFdScan = scan) -> None:
+                try:
+                    for pid, _fd, target, identity in _iter_darwin_fd_targets():
+                        if target.casefold().endswith(("-wal", "-shm")):
+                            state.targets.append((pid, target, identity))
+                except BaseException as exc:  # health: allow BLE001 -- handed to the waiting caller, which re-raises it
+                    state.error = exc
+                finally:
+                    state.done.set()
+
+            # ponytail: a kernel-blocked proc_pidfdinfo cannot be interrupted, so an overrun pass stays
+            # abandoned in its daemon thread; being the only one, it no longer multiplies.
+            scan.worker = threading.Thread(target=_run, daemon=True, name="hermes-wal-holder-scan")
+            scan.worker.start()
+    if not scan.done.wait(_DARWIN_FD_SCAN_TIMEOUT_SECONDS):
+        scan.overran = True
+        logger.warning(
+            "deleted-WAL holder scan timed out after %.1fs; continuing fail-open "
+            "(later opens skip the scan until this pass ends)",
+            _DARWIN_FD_SCAN_TIMEOUT_SECONDS,
+        )
+        return None
+    if scan.error is not None:
+        raise scan.error
+    return list(scan.targets)
 
 
 def iter_deleted_sqlite_sidecar_holders(db_path) -> list[tuple[int, str]]:
