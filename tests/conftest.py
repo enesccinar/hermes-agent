@@ -461,6 +461,14 @@ def _reset_foreground_exit_fence():
 
 
 @pytest.fixture(autouse=True)
+def _reset_darwin_wal_holder_scan():
+    """Forget the process-wide deleted-WAL holder pass, so one test's faked hung pass never answers another's."""
+    yield
+    if (dbfile := sys.modules.get("hermes_state_dbfile")) is not None:
+        dbfile._DARWIN_FD_SCAN = None
+
+
+@pytest.fixture(autouse=True)
 def _neutralize_kanban_memory_guard(request, monkeypatch):
     """Pin the kanban dispatcher's memory guard to "no data" for every test.
 
